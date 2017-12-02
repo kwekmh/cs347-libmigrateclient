@@ -23,7 +23,7 @@ libmigrateclient.a: $(OBJS)
 	ar -rv $(LIBDIR)/$@ $(OBJS)
 
 tests: build
-	$(CXX) -I./src -o $(TESTS) $(TESTSRCS) $(CXXFLAGS) $(LDFLAGS) -L./lib -lmigrateclient
+	$(CXX) -I./src -o $(TESTS) $(TESTSRCS) $(CXXFLAGS) -L./lib -lmigrateclient $(LDFLAGS)
 
 create_dirs:
 	@mkdir -p $(BUILDDIRS)

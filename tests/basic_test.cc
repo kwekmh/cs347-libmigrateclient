@@ -29,7 +29,9 @@ int main() {
     perror("bind error");
   }
 
-  SendDescriptor(15000, sock);
+  MigrateClient *migrate_client = InitMigrateClient(12345);
+  migrate_client->remote_sock = sock;
+  SendDescriptor(migrate_client, sock);
 
   char ch;
 

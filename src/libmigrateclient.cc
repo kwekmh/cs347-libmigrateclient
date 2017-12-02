@@ -16,13 +16,15 @@
 
 #include "libmigrateclient.h"
 
-bool SendDescriptor(int service_identifier, int fd) {
+MigrateClient * InitMigrateClient(int service_identifier) {
+  MigrateClient *migrate_client = new MigrateClient();
+
   int sock;
   struct sockaddr_un addr;
 
   if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-    perror("SendDescriptor socket");
-    return false;
+    perror("SendDescriptor() socket");
+    return NULL;
   }
 
   addr.sun_family = AF_UNIX;
@@ -30,12 +32,74 @@ bool SendDescriptor(int service_identifier, int fd) {
 
   if (connect(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
     perror("SendDescriptor() connect");
-    return false;
+    return NULL;
   }
 
+  migrate_client->local_sock = sock;
+  migrate_client->service_identifier = service_identifier;
+
+  SendRegistration(migrate_client);
+
+  pthread_t migrate_client_pthread;
+
+  pthread_create(&migrate_client_pthread, NULL, HandleMigrateClient, (void *) migrate_client);
+
+  return migrate_client;
+}
+
+void * HandleMigrateClient(void *c) {
+  std::cout << "Starting Migration Client Service" << std::endl;
+  MigrateClient *migrate_client = (MigrateClient *) c;
+
+  char buf[MSG_BUFFER_SIZE];
+
+  int in_bytes;
+
+  while (1) {
+    in_bytes = recv(migrate_client->local_sock, buf, MSG_BUFFER_SIZE, 0);
+    if (in_bytes < 0) {
+      perror("HandleMigrateClient() recv");
+      // TODO: Clean up
+      pthread_exit(NULL);
+    } else if (in_bytes == 0) {
+      // TODO: Clean up
+      pthread_exit(NULL);
+    }
+
+    std::cout << "LOCALMSG: " << std::string(buf, in_bytes) << std::endl;
+
+    int i = 0;
+
+    while (i < in_bytes) {
+      std::stringstream msg_size_ss;
+      for (; i < in_bytes; i++) {
+        if (buf[i] != ' ') {
+          msg_size_ss << buf[i];
+        } else {
+          break;
+        }
+      }
+
+      i++;
+
+      std::string msg_size_str = msg_size_ss.str();
+      int msg_size = std::stoi(msg_size_ss.str());
+      if (msg_size == 6 and strncmp(buf + i, "SOCKET", 6) == 0) {
+        i += 6;
+
+        //Create socket
+        int new_sock = socket(AF_INET, SOCK_STREAM, 0);
+        migrate_client->remote_sock = new_sock;
+        SendDescriptor(migrate_client, new_sock);
+      }
+    }
+  }
+}
+
+bool SendDescriptor(MigrateClient *migrate_client, int fd) {
   std::stringstream msgstream;
 
-  msgstream << "SOCKET " << service_identifier;
+  msgstream << "SOCKET " << migrate_client->service_identifier;
 
   std::string msg = msgstream.str();
 
@@ -46,7 +110,7 @@ bool SendDescriptor(int service_identifier, int fd) {
 
   msg = msgstream.str();
 
-  if (send(sock, msg.c_str(), msg.length(), 0) < 0) {
+  if (send(migrate_client->local_sock, msg.c_str(), msg.length(), 0) < 0) {
     perror("SendDescriptor() send");
     return false;
   } else {
@@ -79,12 +143,32 @@ bool SendDescriptor(int service_identifier, int fd) {
 
     ((int *) CMSG_DATA(cmsghdr))[0] = fd;
 
-    if (sendmsg(sock, &msghdr, 0) < 0) {
+    if (sendmsg(migrate_client->local_sock, &msghdr, 0) < 0) {
       perror("SendDescriptor() sendmsg");
       return false;
     } else {
       std::cout << "Descriptor sent" << std::endl;
       return true;
     }
+  }
+}
+
+void SendRegistration(MigrateClient *migrate_client) {
+  std::cout << "Registration client with Migration Client Service" << std::endl;
+  std::stringstream msgstream;
+
+  msgstream << "REG " << migrate_client->service_identifier;
+
+  std::string msg = msgstream.str();
+
+  msgstream.str("");
+  msgstream.clear();
+
+  msgstream << msg.length() << " " << msg;
+
+  msg = msgstream.str();
+
+  if (send(migrate_client->local_sock, msg.c_str(), msg.length(), 0) < 0) {
+    perror("SendRegistration() send");
   }
 }
